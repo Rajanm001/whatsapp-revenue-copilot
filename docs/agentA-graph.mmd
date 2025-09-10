@@ -1,0 +1,49 @@
+```mermaid
+graph TD
+    START([Start: Knowledge Request]) --> CHECK_FILE{Has File Attachment?}
+    
+    %% File Ingestion Path
+    CHECK_FILE -->|Yes| INGEST[Ingest Document Node]
+    INGEST --> CHUNK[Chunk Text]
+    CHUNK --> EMBED[Generate Embeddings]  
+    EMBED --> STORE[Store in Chroma]
+    STORE --> LOG_INGEST[Log Ingestion]
+    
+    %% Q&A Path
+    CHECK_FILE -->|No| RETRIEVE[Retrieve Documents Node]
+    LOG_INGEST --> RETRIEVE
+    RETRIEVE --> QUERY_EMBED[Embed Query]
+    QUERY_EMBED --> SEARCH[Search Chroma DB]
+    SEARCH --> ANSWER[Generate Answer Node]
+    ANSWER --> GROUND[Ground with Citations]
+    GROUND --> LLM_ANSWER[LLM Answer Generation]
+    LLM_ANSWER --> REFLECT[Self-Reflect Node]
+    
+    %% Self-Reflection & Quality Check
+    REFLECT --> CONFIDENCE{Confidence > 0.6?}
+    CONFIDENCE -->|No| CLARIFY[Request Clarification]
+    CONFIDENCE -->|Yes| SCHEDULE_CHECK{Scheduling Intent?}
+    
+    %% Scheduling Detection & Parsing
+    SCHEDULE_CHECK -->|Yes| PARSE_SCHEDULE[Parse Scheduling Node]
+    PARSE_SCHEDULE --> EXTRACT_TIME[Extract Time Info]
+    EXTRACT_TIME --> PARSE_DT[Parse DateTime]
+    PARSE_DT --> SCHEDULE_RESULT[Schedule Result]
+    
+    SCHEDULE_CHECK -->|No| END_QA[End: Q&A Complete]
+    CLARIFY --> END_QA
+    SCHEDULE_RESULT --> END_SCHEDULE[End: With Schedule]
+    
+    %% Styling
+    classDef startEnd fill:#e1f5fe
+    classDef process fill:#f3e5f5  
+    classDef decision fill:#fff3e0
+    classDef storage fill:#e8f5e8
+    classDef llm fill:#fce4ec
+    
+    class START,END_QA,END_SCHEDULE startEnd
+    class INGEST,RETRIEVE,ANSWER,REFLECT,PARSE_SCHEDULE process
+    class CHECK_FILE,CONFIDENCE,SCHEDULE_CHECK decision
+    class CHUNK,EMBED,STORE,QUERY_EMBED,SEARCH storage  
+    class GROUND,LLM_ANSWER,EXTRACT_TIME,PARSE_DT llm
+```

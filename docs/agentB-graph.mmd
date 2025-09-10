@@ -1,0 +1,69 @@
+```mermaid
+graph TD
+    START([Start: Dealflow Request]) --> ROUTE{Request Type?}
+    
+    %% Lead Capture Path
+    ROUTE -->|Lead Capture| PARSE_LEAD[Parse Lead Node]
+    PARSE_LEAD --> EXTRACT_INFO[Extract Contact Info]
+    EXTRACT_INFO --> NORMALIZE[Normalize Data]
+    NORMALIZE --> ENRICH[Enrich Lead Node]
+    ENRICH --> GUESS_DOMAIN[Guess Company Domain]
+    GUESS_DOMAIN --> QUALITY_SCORE[Calculate Quality Score]
+    QUALITY_SCORE --> LEAD_RESULT[Lead Result]
+    
+    %% Proposal Generation Path  
+    ROUTE -->|Proposal Request| GENERATE_PROPOSAL[Generate Proposal Node]
+    GENERATE_PROPOSAL --> ANALYZE_LEAD[Analyze Lead Context]
+    ANALYZE_LEAD --> LLM_PROPOSAL[LLM Proposal Generation]
+    LLM_PROPOSAL --> FORMAT_PROPOSAL[Format & Structure]
+    FORMAT_PROPOSAL --> PROPOSAL_RESULT[Proposal Result]
+    
+    %% Next Step Scheduling Path
+    ROUTE -->|Next Step| PARSE_SCHEDULE[Parse Schedule Node]
+    PARSE_SCHEDULE --> EXTRACT_TIME[Extract Time Patterns]
+    EXTRACT_TIME --> PARSE_DATETIME[Parse DateTime]
+    PARSE_DATETIME --> MEETING_TYPE[Determine Meeting Type]
+    MEETING_TYPE --> SCHEDULE_RESULT[Schedule Result]
+    
+    %% Status Classification Path
+    ROUTE -->|Status Update| CLASSIFY_STATUS[Classify Status Node]
+    CLASSIFY_STATUS --> DETECT_STATUS[Detect Status Label]
+    DETECT_STATUS --> CATEGORIZE[Categorize Reason]
+    CATEGORIZE --> SUMMARIZE[Summarize Context]
+    SUMMARIZE --> STATUS_RESULT[Status Result]
+    
+    %% Validation & Quality Checks
+    LEAD_RESULT --> VALIDATE_LEAD{Valid Lead?}
+    VALIDATE_LEAD -->|Yes| END_LEAD[End: Lead Captured]
+    VALIDATE_LEAD -->|No| LEAD_ERROR[Lead Error]
+    
+    PROPOSAL_RESULT --> VALIDATE_PROPOSAL{Valid Proposal?}
+    VALIDATE_PROPOSAL -->|Yes| END_PROPOSAL[End: Proposal Generated]  
+    VALIDATE_PROPOSAL -->|No| PROPOSAL_ERROR[Proposal Error]
+    
+    SCHEDULE_RESULT --> VALIDATE_SCHEDULE{Valid Schedule?}
+    VALIDATE_SCHEDULE -->|Yes| END_SCHEDULE[End: Schedule Parsed]
+    VALIDATE_SCHEDULE -->|No| SCHEDULE_ERROR[Schedule Error]
+    
+    STATUS_RESULT --> END_STATUS[End: Status Classified]
+    
+    %% Error Handling
+    LEAD_ERROR --> END_ERROR[End: With Error]
+    PROPOSAL_ERROR --> END_ERROR
+    SCHEDULE_ERROR --> END_ERROR
+    
+    %% Styling
+    classDef startEnd fill:#e1f5fe
+    classDef process fill:#f3e5f5
+    classDef decision fill:#fff3e0  
+    classDef llm fill:#fce4ec
+    classDef error fill:#ffebee
+    classDef success fill:#e8f5e8
+    
+    class START startEnd
+    class PARSE_LEAD,ENRICH,GENERATE_PROPOSAL,PARSE_SCHEDULE,CLASSIFY_STATUS process
+    class ROUTE,VALIDATE_LEAD,VALIDATE_PROPOSAL,VALIDATE_SCHEDULE decision
+    class LLM_PROPOSAL,ANALYZE_LEAD,FORMAT_PROPOSAL llm  
+    class LEAD_ERROR,PROPOSAL_ERROR,SCHEDULE_ERROR,END_ERROR error
+    class END_LEAD,END_PROPOSAL,END_SCHEDULE,END_STATUS success
+```

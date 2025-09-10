@@ -1,0 +1,96 @@
+```mermaid
+sequenceDiagram
+    participant User as WhatsApp User
+    participant WH as WhatsApp Webhook
+    participant N8N as n8n Orchestrator
+    participant IC as Intent Classifier
+    participant AA as Agent A (Knowledge)
+    participant AB as Agent B (Dealflow)
+    participant GD as Google Drive
+    participant GS as Google Sheets
+    participant GC as Google Calendar
+    participant CV as Chroma Vector DB
+
+    %% Knowledge Q&A Flow
+    Note over User,CV: Knowledge Q&A Flow
+    User->>WH: "What's our refund policy?"
+    WH->>N8N: Message received
+    N8N->>IC: Classify intent
+    IC-->>N8N: intent: "knowledge_qa"
+    N8N->>AA: POST /agentA/ask
+    AA->>CV: Retrieve relevant docs
+    CV-->>AA: Document chunks
+    AA->>AA: Generate answer + citations
+    AA-->>N8N: Answer with citations
+    N8N->>GS: Log conversation
+    N8N->>WH: Send response
+    WH-->>User: Answer with citations
+
+    %% File Ingestion Flow  
+    Note over User,CV: File Ingestion Flow
+    User->>WH: [Sends PDF file]
+    WH->>N8N: File attachment received
+    N8N->>GD: Save to KnowledgeBase folder
+    N8N->>AA: POST /agentA/ingest
+    AA->>AA: Chunk & embed document
+    AA->>CV: Store embeddings
+    AA-->>N8N: Ingestion result
+    N8N->>GS: Log ingestion
+    N8N->>WH: Confirmation message
+    WH-->>User: "File added to knowledge base"
+
+    %% Lead Capture Flow
+    Note over User,CV: Lead Capture Flow  
+    User->>WH: "John from Acme wants PoC, budget 10k"
+    WH->>N8N: Message received
+    N8N->>IC: Classify intent
+    IC-->>N8N: intent: "lead_capture"
+    N8N->>AB: POST /agentB/newlead
+    AB->>AB: Parse & enrich lead data
+    AB-->>N8N: Structured lead info
+    N8N->>GS: Update CRM sheet
+    N8N->>WH: Send confirmation
+    WH-->>User: "Lead captured: John Smith - Acme Corp"
+
+    %% Proposal Generation Flow
+    Note over User,CV: Proposal Generation Flow
+    User->>WH: "Draft proposal for Acme"
+    WH->>N8N: Message received  
+    N8N->>IC: Classify intent
+    IC-->>N8N: intent: "proposal_request"
+    N8N->>AB: POST /agentB/proposal-copy
+    AB->>AB: Generate proposal content
+    AB-->>N8N: Proposal copy
+    N8N->>GD: Create proposal document
+    N8N->>GD: Export as PDF
+    N8N->>GS: Update CRM with proposal link
+    N8N->>WH: Send Drive link
+    WH-->>User: "Proposal ready: [link]"
+
+    %% Scheduling Flow
+    Note over User,CV: Scheduling Flow
+    User->>WH: "Schedule demo next Wed at 11am"
+    WH->>N8N: Message received
+    N8N->>IC: Classify intent  
+    IC-->>N8N: intent: "next_step"
+    N8N->>AB: POST /agentB/nextstep-parse
+    AB->>AB: Parse scheduling info
+    AB-->>N8N: Meeting details
+    N8N->>GC: Create calendar event
+    N8N->>GS: Update CRM NextStepDate
+    N8N->>WH: Send confirmation
+    WH-->>User: "Demo scheduled: Wed 11am [calendar link]"
+
+    %% Status Update Flow
+    Note over User,CV: Status Update Flow
+    User->>WH: "We lost Acme - budget cut"
+    WH->>N8N: Message received
+    N8N->>IC: Classify intent
+    IC-->>N8N: intent: "status_update"  
+    N8N->>AB: POST /agentB/status-classify
+    AB->>AB: Classify status & reason
+    AB-->>N8N: Status classification
+    N8N->>GS: Update CRM status
+    N8N->>WH: Send confirmation
+    WH-->>User: "Status updated: Lost - Budget"
+```

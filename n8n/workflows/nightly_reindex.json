@@ -1,0 +1,294 @@
+{
+  "name": "Nightly Re-index - Knowledge Base Maintenance",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 2 * * *"
+            }
+          ]
+        }
+      },
+      "id": "nightly-trigger",
+      "name": "Nightly Trigger (2 AM)",
+      "type": "n8n-nodes-base.cron",
+      "typeVersion": 1,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "resource": "file",
+        "operation": "list",
+        "folderId": "KNOWLEDGE_BASE_FOLDER_ID",
+        "options": {
+          "fields": ["id", "name", "modifiedTime", "mimeType"],
+          "queryFilters": "modifiedTime > '{{new Date(Date.now() - 24*60*60*1000).toISOString()}}''"
+        }
+      },
+      "id": "get-recent-files",
+      "name": "Get Recent Files",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [200, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Process files for re-indexing\nconst files = $input.all().map(item => item.json);\nconst recentFiles = files.filter(file => {\n  const supportedTypes = [\n    'application/pdf',\n    'application/vnd.google-apps.document',\n    'application/msword',\n    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',\n    'text/plain'\n  ];\n  return supportedTypes.includes(file.mimeType);\n});\n\nreturn recentFiles.map(file => ({\n  fileId: file.id,\n  fileName: file.name,\n  modifiedTime: file.modifiedTime,\n  needsReindex: true\n}));"
+      },
+      "id": "filter-files",
+      "name": "Filter Files for Re-index",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [400, 0]
+    },
+    {
+      "parameters": {
+        "batchSize": 5,
+        "options": {}
+      },
+      "id": "batch-process",
+      "name": "Batch Process Files",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [600, 0]
+    },
+    {
+      "parameters": {
+        "url": "http://agenta:8001/agentA/ingest",
+        "options": {
+          "bodyContentType": "json",
+          "jsonBody": "={\"driveFileId\": \"{{$json.fileId}}\"}",
+          "response": {
+            "response": {
+              "fullResponse": false,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 60000
+        }
+      },
+      "id": "re-ingest-file",
+      "name": "Re-ingest File",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [800, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Wait between batch processing\nconst sleep = ms => new Promise(resolve => setTimeout(resolve, ms));\nawait sleep(2000); // Wait 2 seconds between batches\n\nreturn $input.all();"
+      },
+      "id": "rate-limit",
+      "name": "Rate Limit",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1000, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Aggregate results\nconst allResults = $input.all();\nconst successful = allResults.filter(r => r.json.chunks > 0).length;\nconst failed = allResults.length - successful;\nconst totalChunks = allResults.reduce((sum, r) => sum + (r.json.chunks || 0), 0);\nconst totalTokens = allResults.reduce((sum, r) => sum + (r.json.tokens || 0), 0);\n\nreturn {\n  timestamp: new Date().toISOString(),\n  totalFiles: allResults.length,\n  successful,\n  failed,\n  totalChunks,\n  totalTokens,\n  errors: allResults.filter(r => r.json.error).map(r => r.json.error)\n};"
+      },
+      "id": "aggregate-results",
+      "name": "Aggregate Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1200, 0]
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": "ADMIN_SHEET_ID",
+        "sheetName": "ReindexLogs",
+        "columns": {
+          "mappingMode": "defineBelow",
+          "values": {
+            "Timestamp": "={{$json.timestamp}}",
+            "TotalFiles": "={{$json.totalFiles}}",
+            "Successful": "={{$json.successful}}",
+            "Failed": "={{$json.failed}}",
+            "TotalChunks": "={{$json.totalChunks}}",
+            "TotalTokens": "={{$json.totalTokens}}",
+            "Errors": "={{$json.errors.join('; ')}}"
+          }
+        },
+        "options": {}
+      },
+      "id": "log-reindex-results",
+      "name": "Log Reindex Results",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [1400, 0]
+    },
+    {
+      "parameters": {
+        "text": "🔄 Nightly re-index completed!\n\n📊 **Results:**\n• Total files: {{$json.totalFiles}}\n• Successful: {{$json.successful}}\n• Failed: {{$json.failed}}\n• Chunks processed: {{$json.totalChunks}}\n• Tokens: {{$json.totalTokens}}\n\n{{$json.failed > 0 ? '⚠️ Some files failed - check logs for details.' : '✅ All files processed successfully!'}}",
+        "additionalFields": {
+          "chatId": "ADMIN_CHAT_ID"
+        }
+      },
+      "id": "send-reindex-summary",
+      "name": "Send Reindex Summary",
+      "type": "n8n-nodes-base.whatsApp",
+      "typeVersion": 1,
+      "position": [1600, 0]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{$json.failed}}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ]
+        }
+      },
+      "id": "has-failures",
+      "name": "Has Failures?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1400, 200]
+    },
+    {
+      "parameters": {
+        "text": "❌ **Re-index Errors Detected**\n\n{{$json.errors.slice(0, 5).map((error, i) => `${i+1}. ${error}`).join('\\n')}}\n\n{{$json.errors.length > 5 ? `...and ${$json.errors.length - 5} more errors` : ''}}\n\nPlease check the ReindexLogs sheet for full details.",
+        "additionalFields": {
+          "chatId": "ERROR_CHAT_ID"
+        }
+      },
+      "id": "send-error-details",
+      "name": "Send Error Details",
+      "type": "n8n-nodes-base.whatsApp",
+      "typeVersion": 1,
+      "position": [1600, 200]
+    }
+  ],
+  "connections": {
+    "Nightly Trigger (2 AM)": {
+      "main": [
+        [
+          {
+            "node": "Get Recent Files",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Recent Files": {
+      "main": [
+        [
+          {
+            "node": "Filter Files for Re-index",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Files for Re-index": {
+      "main": [
+        [
+          {
+            "node": "Batch Process Files",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Batch Process Files": {
+      "main": [
+        [
+          {
+            "node": "Re-ingest File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Re-ingest File": {
+      "main": [
+        [
+          {
+            "node": "Rate Limit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Rate Limit": {
+      "main": [
+        [
+          {
+            "node": "Aggregate Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate Results": {
+      "main": [
+        [
+          {
+            "node": "Log Reindex Results",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Has Failures?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Reindex Results": {
+      "main": [
+        [
+          {
+            "node": "Send Reindex Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Failures?": {
+      "main": [
+        [
+          {
+            "node": "Send Error Details",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "1.0.0",
+  "id": "nightly-reindex",
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": []
+}
