@@ -1,272 +1,357 @@
 {
-  "name": "WhatsApp Router - Main Orchestrator",
+  "meta": {
+    "instanceId": "whatsapp-copilot-instance"
+  },
+  "name": "WhatsApp Revenue Copilot - Main Router",
   "nodes": [
     {
-      "parameters": {},
-      "id": "webhook-whatsapp",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "whatsapp-webhook",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
       "name": "WhatsApp Webhook",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 1,
-      "position": [0, 0],
+      "position": [240, 300],
       "webhookId": "whatsapp-inbound"
     },
     {
       "parameters": {
-        "jsCode": "// Pre-route based on attachments and content\nconst message = $input.first().json;\nconst hasAttachments = message.attachments && message.attachments.length > 0;\nconst messageText = message.text || '';\nconst userId = message.from;\n\nif (hasAttachments) {\n  return {\n    intent: 'knowledge_qa',\n    route: 'agentA',\n    hasAttachments: true,\n    userId,\n    messageText,\n    attachments: message.attachments\n  };\n}\n\n// For text-only messages, we'll need intent classification\nreturn {\n  needsClassification: true,\n  userId,\n  messageText,\n  hasAttachments: false\n};"
+        "jsCode": "// Extract and process WhatsApp message\nconst items = $input.all();\nconst firstItem = items[0];\nconst body = firstItem.json.body || firstItem.json;\n\n// Handle different WhatsApp webhook structures\nlet message = {};\nif (body.entry && body.entry[0] && body.entry[0].changes) {\n  const change = body.entry[0].changes[0];\n  if (change.value && change.value.messages && change.value.messages[0]) {\n    const msg = change.value.messages[0];\n    message = {\n      from: msg.from,\n      text: msg.text ? msg.text.body : '',\n      type: msg.type || 'text',\n      timestamp: msg.timestamp,\n      id: msg.id\n    };\n    \n    // Check for attachments/media\n    if (msg.type === 'document' || msg.type === 'image') {\n      message.hasAttachments = true;\n      message.media = msg[msg.type];\n    } else {\n      message.hasAttachments = false;\n    }\n  }\n} else {\n  // Fallback for direct message format\n  message = {\n    from: body.from || 'unknown',\n    text: body.text || body.message || '',\n    hasAttachments: !!(body.attachments && body.attachments.length > 0),\n    type: 'text'\n  };\n}\n\nreturn [{\n  json: {\n    messageData: message,\n    needsClassification: !message.hasAttachments,\n    userId: message.from,\n    messageText: message.text,\n    hasAttachments: message.hasAttachments\n  }\n}];"
       },
-      "id": "pre-router",
-      "name": "Pre-Router Logic",
+      "id": "message-processor",
+      "name": "Process Message",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [200, 0]
+      "position": [460, 300]
     },
     {
       "parameters": {
         "conditions": {
-          "options": {
-            "caseSensitive": true,
-            "leftValue": "",
-            "typeValidation": "strict"
-          },
-          "conditions": [
+          "boolean": [
             {
-              "leftValue": "={{$json.hasAttachments}}",
-              "rightValue": true,
-              "operator": {
-                "type": "boolean"
-              }
+              "value1": "={{$json.hasAttachments}}",
+              "value2": true
             }
           ]
         }
       },
-      "id": "has-attachments-check",
+      "id": "attachment-check",
       "name": "Has Attachments?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 1,
-      "position": [400, 0]
+      "position": [680, 300]
     },
     {
       "parameters": {
+        "method": "POST",
         "url": "http://agenta:8001/agentA/ingest",
-        "options": {
-          "bodyContentType": "json",
-          "jsonBody": "={\"driveFileId\": \"{{$json.attachments[0].id}}\"}",
-          "response": {
-            "response": {
-              "fullResponse": false,
-              "responseFormat": "json"
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
             }
-          }
-        }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "media",
+              "value": "={{$json.messageData.media}}"
+            },
+            {
+              "name": "userId",
+              "value": "={{$json.userId}}"
+            }
+          ]
+        },
+        "options": {}
       },
-      "id": "save-to-drive-and-ingest",
-      "name": "Save to Drive & Ingest",
+      "id": "file-ingestion",
+      "name": "Process File Upload",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
-      "position": [600, -100]
+      "position": [900, 180]
     },
     {
       "parameters": {
-        "url": "={{$json.needsClassification ? 'http://shared:8000/classify' : ''}}",
-        "options": {
-          "bodyContentType": "json",
-          "jsonBody": "={\"message\": \"{{$json.messageText}}\", \"hasAttachments\": false}",
-          "response": {
-            "response": {
-              "fullResponse": false,
-              "responseFormat": "json"
+        "method": "POST",
+        "url": "http://shared:8000/classify",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
             }
-          }
-        }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "message",
+              "value": "={{$json.messageText}}"
+            },
+            {
+              "name": "userId",
+              "value": "={{$json.userId}}"
+            }
+          ]
+        },
+        "options": {}
       },
-      "id": "intent-classifier",
-      "name": "Intent Classifier",
+      "id": "intent-classification",
+      "name": "Classify Intent",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
-      "position": [600, 100]
+      "position": [900, 420]
     },
     {
       "parameters": {
         "conditions": {
-          "options": {
-            "caseSensitive": true,
-            "leftValue": "",
-            "typeValidation": "strict"
-          },
-          "conditions": [
+          "string": [
             {
-              "leftValue": "={{$json.intent}}",
-              "rightValue": "knowledge_qa",
-              "operator": {
-                "type": "string",
-                "operation": "equals"
-              }
+              "value1": "={{$json.intent}}",
+              "value2": "knowledge_qa"
             }
           ]
         }
       },
-      "id": "route-to-agents",
-      "name": "Route to Agents",
+      "id": "route-decision",
+      "name": "Route to Agent",
       "type": "n8n-nodes-base.if",
       "typeVersion": 1,
-      "position": [800, 0]
+      "position": [1120, 300]
     },
     {
       "parameters": {
+        "method": "POST",
         "url": "http://agenta:8001/agentA/ask",
-        "options": {
-          "bodyContentType": "json",
-          "jsonBody": "={\"userId\": \"{{$json.userId}}\", \"text\": \"{{$json.messageText}}\"}",
-          "response": {
-            "response": {
-              "fullResponse": false,
-              "responseFormat": "json"
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
             }
-          }
-        }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "userId",
+              "value": "={{$json.userId}}"
+            },
+            {
+              "name": "text",
+              "value": "={{$json.messageText}}"
+            }
+          ]
+        },
+        "options": {}
       },
-      "id": "call-agent-a",
-      "name": "Call Agent A",
+      "id": "agent-a-call",
+      "name": "Call Knowledge Agent",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
-      "position": [1000, -100]
+      "position": [1340, 180]
     },
     {
       "parameters": {
         "conditions": {
-          "options": {
-            "caseSensitive": true,
-            "leftValue": "",
-            "typeValidation": "strict"
-          },
-          "conditions": [
+          "string": [
             {
-              "leftValue": "={{$json.intent}}",
-              "rightValue": "lead_capture",
-              "operator": {
-                "type": "string",
-                "operation": "equals"
-              }
+              "value1": "={{$json.intent}}",
+              "value2": "lead_capture"
             },
             {
-              "leftValue": "={{$json.intent}}",
-              "rightValue": "proposal_request",
-              "operator": {
-                "type": "string",
-                "operation": "equals"
-              }
+              "value1": "={{$json.intent}}",
+              "value2": "proposal_request"
             },
             {
-              "leftValue": "={{$json.intent}}",
-              "rightValue": "next_step",
-              "operator": {
-                "type": "string",
-                "operation": "equals"
-              }
+              "value1": "={{$json.intent}}",
+              "value2": "next_step"
             },
             {
-              "leftValue": "={{$json.intent}}",
-              "rightValue": "status_update",
-              "operator": {
-                "type": "string",
-                "operation": "equals"
-              }
+              "value1": "={{$json.intent}}",
+              "value2": "status_update"
             }
           ],
-          "combinator": "or"
+          "combineOperation": "any"
         }
       },
-      "id": "check-dealflow-intents",
-      "name": "Check Dealflow Intents",
+      "id": "dealflow-check",
+      "name": "Check Dealflow Intent",
       "type": "n8n-nodes-base.if",
       "typeVersion": 1,
-      "position": [1000, 100]
+      "position": [1340, 420]
     },
     {
       "parameters": {
-        "url": "={{$json.intent === 'lead_capture' ? 'http://agentb:8002/agentB/newlead' : ($json.intent === 'proposal_request' ? 'http://agentb:8002/agentB/proposal-copy' : ($json.intent === 'next_step' ? 'http://agentb:8002/agentB/nextstep-parse' : 'http://agentb:8002/agentB/status-classify'))}}",
-        "options": {
-          "bodyContentType": "json",
-          "jsonBody": "={{$json.intent === 'lead_capture' ? {\"raw\": $json.messageText} : ($json.intent === 'proposal_request' ? {\"lead\": $json.lastLead || {}} : ($json.intent === 'next_step' ? {\"text\": $json.messageText} : {\"label\": \"Unknown\", \"reasonText\": $json.messageText}))}}",
-          "response": {
-            "response": {
-              "fullResponse": false,
-              "responseFormat": "json"
+        "method": "POST",
+        "url": "={{$json.intent === 'lead_capture' ? 'http://agentb:8002/agentB/newlead' : $json.intent === 'proposal_request' ? 'http://agentb:8002/agentB/proposal-copy' : $json.intent === 'next_step' ? 'http://agentb:8002/agentB/nextstep-parse' : 'http://agentb:8002/agentB/status-classify'}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
             }
-          }
-        }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "raw",
+              "value": "={{$json.messageText}}"
+            },
+            {
+              "name": "userId",
+              "value": "={{$json.userId}}"
+            }
+          ]
+        },
+        "options": {}
       },
-      "id": "call-agent-b",
-      "name": "Call Agent B",
+      "id": "agent-b-call",
+      "name": "Call Dealflow Agent",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
-      "position": [1200, 100]
+      "position": [1560, 420]
     },
     {
       "parameters": {
-        "operation": "appendOrUpdate",
-        "documentId": "CONVERSATIONS_SHEET_ID",
+        "operation": "append",
+        "documentId": "={{$env.CONVERSATIONS_SHEET_ID}}",
         "sheetName": "Conversations",
         "columns": {
           "mappingMode": "defineBelow",
           "values": {
             "Timestamp": "={{new Date().toISOString()}}",
             "User": "={{$json.userId}}",
-            "Intent": "={{$json.intent}}",
+            "Intent": "={{$json.intent || 'file_upload'}}",
             "Input": "={{$json.messageText}}",
-            "Output": "={{$json.answer || $json.title || 'Processing...'}}",
-            "Confidence": "={{$json.confidence || 'N/A'}}",
-            "Citations": "={{($json.citations || []).map(c => c.title).join(', ')}}",
+            "Output": "={{$json.answer || $json.response || 'File processed'}}",
+            "Confidence": "={{$json.confidence || 0.95}}",
+            "Citations": "={{$json.citations ? JSON.stringify($json.citations) : ''}}",
             "Error": "={{$json.error || ''}}"
           }
         },
         "options": {}
       },
       "id": "log-conversation",
-      "name": "Log to Conversations Sheet",
+      "name": "Log Conversation",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4,
-      "position": [1400, 0]
+      "position": [1780, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "google-sheets-oauth",
+          "name": "Google Sheets OAuth2"
+        }
+      }
     },
     {
       "parameters": {
-        "operation": "appendOrUpdate",
-        "documentId": "CRM_SHEET_ID", 
+        "operation": "append",
+        "documentId": "={{$env.CRM_SHEET_ID}}",
         "sheetName": "CRM",
         "columns": {
           "mappingMode": "defineBelow",
           "values": {
             "Timestamp": "={{new Date().toISOString()}}",
-            "LeadId": "={{$json.requestId || Date.now()}}",
+            "LeadId": "={{$json.leadId || ''}}",
             "Name": "={{$json.name || ''}}",
             "Company": "={{$json.company || ''}}",
-            "Intent": "={{$json.intent || ''}}",
+            "Intent": "={{$json.intent}}",
             "Budget": "={{$json.budget || ''}}",
-            "Stage": "={{$json.label || 'New'}}",
-            "Owner": "system",
-            "NextStepDate": "={{$json.startIso || ''}}",
+            "Stage": "={{$json.stage || 'New'}}",
+            "Owner": "WhatsApp Bot",
+            "NextStepDate": "={{$json.nextStepDate || ''}}",
             "Links": "={{$json.proposalLink || ''}}",
-            "Notes": "={{$json.notes || $json.reasonSummary || ''}}"
+            "Notes": "={{$json.notes || $json.messageText}}"
           }
         },
         "options": {}
       },
       "id": "update-crm",
-      "name": "Update CRM Sheet", 
+      "name": "Update CRM",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4,
-      "position": [1400, 200]
+      "position": [1780, 500],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "google-sheets-oauth",
+          "name": "Google Sheets OAuth2"
+        }
+      }
     },
     {
       "parameters": {
-        "text": "={{$json.answer || $json.title || 'Got it! I\\'ve processed your request.'}}",
-        "additionalFields": {}
+        "method": "POST",
+        "url": "={{$env.WHATSAPP_API_URL}}/{{$env.WHATSAPP_PHONE_NUMBER_ID}}/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{$env.WHATSAPP_ACCESS_TOKEN}}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "messaging_product",
+              "value": "whatsapp"
+            },
+            {
+              "name": "to",
+              "value": "={{$json.userId}}"
+            },
+            {
+              "name": "type",
+              "value": "text"
+            },
+            {
+              "name": "text",
+              "value": "={{JSON.stringify({body: $json.answer || $json.response || $json.title || 'Message processed successfully!'})}}",
+              "type": "json"
+            }
+          ]
+        },
+        "options": {}
       },
-      "id": "send-whatsapp-response",
+      "id": "whatsapp-response",
       "name": "Send WhatsApp Response",
-      "type": "n8n-nodes-base.whatsApp",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [2000, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "OK"
+      },
+      "id": "webhook-response",
+      "name": "Webhook Response",
+      "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1,
-      "position": [1600, 0]
+      "position": [2220, 300]
     }
   ],
   "connections": {
@@ -274,19 +359,19 @@
       "main": [
         [
           {
-            "node": "Pre-Router Logic",
+            "node": "Process Message",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Pre-Router Logic": {
+    "Process Message": {
       "main": [
         [
           {
             "node": "Has Attachments?",
-            "type": "main", 
+            "type": "main",
             "index": 0
           }
         ]
@@ -296,76 +381,76 @@
       "main": [
         [
           {
-            "node": "Save to Drive & Ingest",
+            "node": "Process File Upload",
             "type": "main",
             "index": 0
           }
         ],
         [
           {
-            "node": "Intent Classifier", 
+            "node": "Classify Intent",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Save to Drive & Ingest": {
+    "Process File Upload": {
       "main": [
         [
           {
-            "node": "Log to Conversations Sheet",
+            "node": "Log Conversation",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Intent Classifier": {
+    "Classify Intent": {
       "main": [
         [
           {
-            "node": "Route to Agents",
+            "node": "Route to Agent",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Route to Agents": {
+    "Route to Agent": {
       "main": [
         [
           {
-            "node": "Call Agent A",
+            "node": "Call Knowledge Agent",
             "type": "main",
             "index": 0
           }
         ],
         [
           {
-            "node": "Check Dealflow Intents",
+            "node": "Check Dealflow Intent",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Call Agent A": {
+    "Call Knowledge Agent": {
       "main": [
         [
           {
-            "node": "Log to Conversations Sheet",
+            "node": "Log Conversation",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Check Dealflow Intents": {
+    "Check Dealflow Intent": {
       "main": [
         [
           {
-            "node": "Call Agent B",
+            "node": "Call Dealflow Agent",
             "type": "main",
             "index": 0
           }
@@ -379,18 +464,18 @@
         ]
       ]
     },
-    "Call Agent B": {
+    "Call Dealflow Agent": {
       "main": [
         [
           {
-            "node": "Update CRM Sheet",
+            "node": "Update CRM",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Log to Conversations Sheet": {
+    "Log Conversation": {
       "main": [
         [
           {
@@ -401,11 +486,22 @@
         ]
       ]
     },
-    "Update CRM Sheet": {
+    "Update CRM": {
       "main": [
         [
           {
             "node": "Send WhatsApp Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send WhatsApp Response": {
+      "main": [
+        [
+          {
+            "node": "Webhook Response",
             "type": "main",
             "index": 0
           }
@@ -413,14 +509,13 @@
       ]
     }
   },
-  "active": true,
+  "pinData": {},
   "settings": {
     "executionOrder": "v1"
   },
-  "versionId": "1.0.0",
-  "id": "whatsapp-router",
-  "meta": {
-    "templateCredsSetupCompleted": true
-  },
-  "tags": []
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 1,
+  "updatedAt": "2025-09-14T00:00:00.000Z",
+  "versionId": "1"
 }
