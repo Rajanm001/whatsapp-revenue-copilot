@@ -1,0 +1,122 @@
+{
+  "meta": {
+    "instanceId": "nightly-reindex-instance"
+  },
+  "name": "Nightly Knowledge Base Reindex",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 2 * * *"
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Daily at 2 AM",
+      "type": "n8n-nodes-base.cron",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://agenta:8001/agentA/reindex",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "full_reindex",
+              "value": "true"
+            },
+            {
+              "name": "optimize",
+              "value": "true"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "trigger-reindex",
+      "name": "Trigger Reindex",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": "={{$env.CONVERSATIONS_SHEET_ID}}",
+        "sheetName": "Maintenance",
+        "columns": {
+          "mappingMode": "defineBelow",
+          "values": {
+            "Timestamp": "={{new Date().toISOString()}}",
+            "Task": "Knowledge Base Reindex",
+            "Status": "={{$json.status || 'Completed'}}",
+            "Duration": "={{$json.duration || ''}}",
+            "Documents": "={{$json.documents_processed || ''}}",
+            "Notes": "={{$json.error || 'Nightly maintenance completed'}}"
+          }
+        },
+        "options": {}
+      },
+      "id": "log-maintenance",
+      "name": "Log Maintenance",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [680, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "google-sheets-oauth",
+          "name": "Google Sheets OAuth2"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Daily at 2 AM": {
+      "main": [
+        [
+          {
+            "node": "Trigger Reindex",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Trigger Reindex": {
+      "main": [
+        [
+          {
+            "node": "Log Maintenance",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 1,
+  "updatedAt": "2025-09-14T00:00:00.000Z",
+  "versionId": "1"
+}
